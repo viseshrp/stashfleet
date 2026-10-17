@@ -1,16 +1,17 @@
 """Orchestration independent of the CLI, UI, and transfer implementation."""
 
 import asyncio
-import json
-import shutil
-import threading
-import uuid
 from collections.abc import Callable
+import contextlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
+import json
 from pathlib import Path
+import shutil
+import threading
 from typing import TypeVar
+import uuid
 
 from . import state
 from .archive import ArchiveBuilder, ZipArchiver, sha256
@@ -118,12 +119,16 @@ class Runner:
                 )
                 archive = self._archive_path(run_id)
                 loop = asyncio.get_running_loop()
+
+                def emit_from_thread(event: Event) -> None:
+                    loop.call_soon_threadsafe(self.emit, event)
+
                 manifest["archive_sha256"] = await self._thread(
                     lambda stop: self.archiver.build(
                         data,
                         archive,
                         self.config.archive,
-                        lambda event: loop.call_soon_threadsafe(self.emit, event),
+                        emit_from_thread,
                         stop,
                     )
                 )
@@ -202,12 +207,13 @@ class Runner:
             try:
                 async with asyncio.timeout(self.config.transfer_timeout):
                     await action()
-                return
             except (OSError, RuntimeError, TimeoutError) as exc:
                 if attempt + 1 == self.config.attempts:
                     raise
                 self.emit(Event(task, "retry", message=str(exc)))
                 await asyncio.sleep(min(self.config.retry_delay * 2**attempt, 60))
+            else:
+                return
 
     async def _upload(self, manifest: dict) -> None:
         manifest["status"] = "cloud_pending"
@@ -232,15 +238,19 @@ class Runner:
             if not self.config.cloud.enabled or manifest["cloud_target"] != self._cloud_target(
                 run_id
             ):
-                raise ValueError("enable the original cloud destination before retrying")
+                msg = "enable the original cloud destination before retrying"
+                raise ValueError(msg)
             if manifest["status"] != "cloud_pending" or not manifest.get("archive_sha256"):
-                raise ValueError("run does not have a pending upload with a complete ZIP")
+                msg = "run does not have a pending upload with a complete ZIP"
+                raise ValueError(msg)
             archive = self._archive_path(run_id)
             if archive.is_symlink():
-                raise ValueError("archive must not be a symlink")
+                msg = "archive must not be a symlink"
+                raise ValueError(msg)
             digest = await self._thread(lambda stop: sha256(archive, stop))
             if digest != manifest["archive_sha256"]:
-                raise ValueError("archive checksum changed; refusing upload")
+                msg = "archive checksum changed; refusing upload"
+                raise ValueError(msg)
             manifest["errors"] = []
             try:
                 await self._upload(manifest)
@@ -262,10 +272,8 @@ class Runner:
             return await asyncio.shield(task)
         except asyncio.CancelledError:
             stop.set()
-            try:
+            with contextlib.suppress(Exception):
                 await task
-            except Exception:
-                pass
             raise
 
     async def _retain(self, current: dict) -> None:
@@ -293,8 +301,7 @@ class Runner:
                     if old.get("local_deleted"):
                         continue
                     path = self.root / "runs" / state.validate_run_id(old["id"])
-                    if path.is_symlink():
-                        raise ValueError(f"refusing to prune symlink: {path}")
+                    _reject_symlink(path)
                     if path.exists():
                         await self._thread(lambda stop, path=path: shutil.rmtree(path))
                     old["local_deleted"] = True
@@ -302,3 +309,9 @@ class Runner:
         except Exception as exc:
             current["errors"].append(f"retention: {exc}")
             self.emit(Event("retention", "failed", message=str(exc)))
+
+
+def _reject_symlink(path: Path) -> None:
+    if path.is_symlink():
+        msg = f"refusing to prune symlink: {path}"
+        raise ValueError(msg)

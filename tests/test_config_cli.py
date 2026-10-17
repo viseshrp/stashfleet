@@ -1,10 +1,10 @@
 import asyncio
+from dataclasses import replace
 import json
 import signal
-from dataclasses import replace
 
-import pytest
 from click.testing import CliRunner
+import pytest
 
 from stashfleet import ArchiveConfig, CloudConfig, ConfigError, Job, load_config
 from stashfleet.cli import main, run_async
@@ -99,12 +99,13 @@ def test_cloud_target_preserves_remote_path(destination, expected):
 def test_cli_restores_previous_sigterm_handler(fail):
     original = signal.getsignal(signal.SIGTERM)
 
-    def previous(*args):
+    def previous(*_args):
         pytest.fail("previous signal handler should not be called")
 
     async def operation():
         if fail:
-            raise ValueError("fake failure")
+            msg = "fake failure"
+            raise ValueError(msg)
         return "finished"
 
     signal.signal(signal.SIGTERM, previous)
@@ -120,7 +121,7 @@ def test_cli_restores_previous_sigterm_handler(fail):
 
 
 def test_cli_demo_no_processes_or_network(tmp_path, monkeypatch):
-    async def forbidden(*args, **kwargs):
+    async def forbidden(*_args, **_kwargs):
         pytest.fail("demo must not launch subprocesses")
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden)
@@ -141,7 +142,7 @@ host = "alpha"
 source = "/config"
 """)
 
-    async def forbidden(*args, **kwargs):
+    async def forbidden(*_args, **_kwargs):
         pytest.fail("dry run must not launch processes")
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden)
@@ -176,7 +177,7 @@ keep_cloud = 3
 binary = "not-installed-rclone"
 """)
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*_args, **_kwargs):
         pytest.fail("dry run must not validate binaries or run the backup")
 
     from stashfleet import RcloneBackend, Runner

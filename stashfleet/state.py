@@ -1,15 +1,18 @@
 """Local run manifests and a process lock. Supported platforms: Linux and macOS."""
 
+from contextlib import contextmanager
 import fcntl
 import json
+from pathlib import Path
 import re
 import tempfile
-from contextlib import contextmanager
-from pathlib import Path
 
 
-class RunLocked(RuntimeError):
+class RunLockedError(RuntimeError):
     pass
+
+
+RunLocked = RunLockedError
 
 
 def check_case_sensitive(root: Path) -> None:
@@ -20,12 +23,14 @@ def check_case_sensitive(root: Path) -> None:
                 with (Path(directory) / name).open("x"):
                     pass
         except FileExistsError as exc:
-            raise ValueError("backup destination must be a case-sensitive filesystem") from exc
+            msg = "backup destination must be a case-sensitive filesystem"
+            raise ValueError(msg) from exc
 
 
 def validate_run_id(run_id: str) -> str:
     if not re.fullmatch(r"\d{8}T\d{12}Z-[a-f0-9]{8}", run_id):
-        raise ValueError("invalid run ID")
+        msg = "invalid run ID"
+        raise ValueError(msg)
     return run_id
 
 
@@ -36,7 +41,8 @@ def run_lock(root: Path):
         try:
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise RunLocked(f"another stashfleet run owns {root}") from exc
+            msg = f"another stashfleet run owns {root}"
+            raise RunLockedError(msg) from exc
         try:
             yield
         finally:
@@ -56,7 +62,8 @@ def read(root: Path, run_id: str) -> dict:
     path = root / "history" / f"{validate_run_id(run_id)}.json"
     value = json.loads(path.read_text())
     if value.get("id") != run_id or value.get("schema") != 1:
-        raise ValueError(f"invalid run manifest: {path}")
+        msg = f"invalid run manifest: {path}"
+        raise ValueError(msg)
     return value
 
 

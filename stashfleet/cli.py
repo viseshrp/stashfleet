@@ -1,13 +1,12 @@
 """Click/Rich presentation. The library itself neither prints nor owns an event loop."""
 
 import asyncio
-import json
-import shlex
-import signal
 from contextlib import contextmanager
 from dataclasses import asdict, replace
-from importlib.metadata import version
+import json
 from pathlib import Path
+import shlex
+import signal
 
 import click
 from rich.console import Console
@@ -22,6 +21,7 @@ from rich.progress import (
 )
 
 from . import state
+from ._version import __version__ as _version
 from .backend import RcloneBackend
 from .config import load_config
 from .demo import create_demo
@@ -112,7 +112,7 @@ def run_async(operation):
         def terminate():
             nonlocal terminated
             # Repeated signals must not interrupt subprocess/thread cleanup.
-            if not terminated:
+            if not terminated and task is not None:
                 terminated = True
                 task.cancel()
 
@@ -132,8 +132,8 @@ def run_async(operation):
         raise SystemExit(128 + signal.SIGTERM) from None
 
 
-@click.group()
-@click.version_option(version=version("stashfleet"))
+@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@click.version_option(_version, "-v", "--version")
 def main():
     """Pull server folders, create one ZIP, optionally upload it to the cloud."""
 
@@ -163,6 +163,9 @@ def show_plan(config, json_events=False):
     run_directory = config.destination / "runs" / "<run-id>"
     archive = run_directory / "stashfleet-<run-id>.zip"
     target = config.cloud.target(archive.name) if config.cloud.enabled else None
+    upload_cmd = (
+        backend.arguments("copyto", str(archive), target, "--immutable") if target else None
+    )
     plan = {
         "type": "plan",
         "dry_run": True,
@@ -174,9 +177,7 @@ def show_plan(config, json_events=False):
             "compression": config.archive.compression,
             "level": config.archive.options()[1],
         },
-        "upload": backend.arguments("copyto", str(archive), target, "--immutable")
-        if target
-        else None,
+        "upload": upload_cmd,
         "retention": {"keep_local": config.keep_local, "keep_cloud": config.keep_cloud},
     }
     for job in config.jobs:
@@ -191,7 +192,7 @@ def show_plan(config, json_events=False):
         click.echo(f"Pull: {shlex.join(command)}")
     click.echo(f"ZIP: {archive}")
     click.echo(f"Compression: {config.archive.compression}; level={plan['archive']['level']}")
-    click.echo(f"Upload: {shlex.join(plan['upload']) if target else 'disabled'}")
+    click.echo(f"Upload: {shlex.join(upload_cmd) if upload_cmd else 'disabled'}")
     local = f"keep newest {config.keep_local} completed runs" if config.keep_local else "keep all"
     cloud = f"keep newest {config.keep_cloud} uploaded ZIPs" if config.keep_cloud else "keep all"
     click.echo(f"Retention: local={local}; cloud={cloud if target else 'disabled'}")

@@ -1,5 +1,16 @@
 # Stashfleet
 
+[![PyPI version](https://img.shields.io/pypi/v/stashfleet.svg)](https://pypi.org/project/stashfleet/)
+[![Python versions](https://img.shields.io/pypi/pyversions/stashfleet.svg?logo=python&logoColor=white)](https://pypi.org/project/stashfleet/)
+[![CI](https://github.com/viseshrp/stashfleet/actions/workflows/main.yml/badge.svg)](https://github.com/viseshrp/stashfleet/actions/workflows/main.yml)
+[![Coverage](https://codecov.io/gh/viseshrp/stashfleet/branch/main/graph/badge.svg)](https://codecov.io/gh/viseshrp/stashfleet)
+[![License: MIT](https://img.shields.io/github/license/viseshrp/stashfleet)](https://github.com/viseshrp/stashfleet/blob/main/LICENSE)
+[![Format: Ruff](https://img.shields.io/badge/format-ruff-000000.svg)](https://docs.astral.sh/ruff/formatter/)
+[![Lint: Ruff](https://img.shields.io/badge/lint-ruff-000000.svg)](https://docs.astral.sh/ruff/)
+[![Typing: ty](https://img.shields.io/badge/typing-checked-blue.svg)](https://docs.astral.sh/ty/)
+
+> Parallel SSH folder backups with ZIP archives and optional cloud uploads
+
 A pip-installable Python library and CLI for parallel server-to-client folder backups.
 Each successful run produces **one ZIP** containing every configured folder. Google Drive
 (or another configured rclone remote) is an optional second destination.
@@ -16,7 +27,7 @@ unvalidated.** Automated tests and the demo use local fixtures only.
 | Transfer orchestration | asyncio subprocesses, rclone, and external OpenSSH/SFTP |
 | Archives and checksums | Standard-library `zipfile` and SHA-256; compression in a worker thread |
 | Configuration and state | TOML input, JSON run/history files, and an OS file lock |
-| Development | uv, Hatchling, pytest, and Ruff |
+| Development | uv, Hatchling, pytest, Ruff, and ty |
 
 Stashfleet runs as a local CLI or Python library. It requires no web server or database.
 
@@ -36,6 +47,46 @@ rclone, reads your SSH settings, or connects to any server or cloud account.
 The library has only two runtime Python dependencies: Click and Rich. Real transfers
 require **rclone and OpenSSH installed separately**. The Python package does not download
 executables, authenticate cloud accounts, or install timers automatically.
+
+## CLI usage
+
+<!-- [[[cog
+import cog
+from click.testing import CliRunner
+
+from stashfleet.cli import main
+
+result = CliRunner().invoke(
+    main,
+    ["--help"],
+    prog_name="stashfleet",
+)
+if result.exit_code != 0:
+    raise RuntimeError(result.output) from result.exception
+
+cog.outl("```console")
+cog.outl("$ " + "stashfleet" + " --help")
+cog.out(result.output)
+cog.outl("```")
+]]] -->
+```console
+$ stashfleet --help
+Usage: stashfleet [OPTIONS] COMMAND [ARGS]...
+
+  Pull server folders, create one ZIP, optionally upload it to the cloud.
+
+Options:
+  -v, --version  Show the version and exit.
+  -h, --help     Show this message and exit.
+
+Commands:
+  demo          Exercise pull -> ZIP -> upload using local fake data only.
+  doctor        Validate config and local dependencies; never connect to...
+  retry-upload  Upload an existing verified ZIP without pulling servers again.
+  run           Run all configured backups once.
+  status        Print recent local run manifests as JSON.
+```
+<!-- [[[end]]] -->
 
 ## Configure a real run
 
@@ -243,6 +294,8 @@ simple glob matching, not the full rclone filter language. No Fabric dependency 
 
 ```sh
 uv sync --group dev
+make check
+make test-local
 uv run pytest
 uv run ruff check .
 uv build
@@ -259,3 +312,16 @@ This repository is self-contained. It was extracted from
 [homelab](https://github.com/viseshrp/homelab/tree/main/stashfleet).
 Wheels and source distributions are built from `pyproject.toml`. Nothing here has been
 published to PyPI.
+
+## Changelog
+
+See [CHANGELOG.md](https://github.com/viseshrp/stashfleet/blob/main/CHANGELOG.md)
+
+## Credits
+
+- [Click](https://click.palletsprojects.com), for enabling delightful CLI development.
+- Inspired by [Simon Willison](https://github.com/simonw)'s work.
+
+## License
+
+MIT © [Visesh Prasad](https://github.com/viseshrp)

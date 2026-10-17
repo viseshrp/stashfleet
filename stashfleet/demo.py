@@ -2,8 +2,8 @@
 
 import asyncio
 import fnmatch
-import shutil
 from pathlib import Path
+import shutil
 
 from .config import CloudConfig, Config, Host, Job
 from .events import Event, EventSink
@@ -28,7 +28,8 @@ class FakeBackend:
             if any(fnmatch.fnmatch(relative.as_posix(), pattern) for pattern in job.excludes):
                 continue
             if path.is_symlink():
-                raise ValueError("fake backend refuses symlinks")
+                msg = "fake backend refuses symlinks"
+                raise ValueError(msg)
             target = destination / relative
             if path.is_dir():
                 target.mkdir(parents=True, exist_ok=True)

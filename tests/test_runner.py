@@ -1,11 +1,11 @@
 import asyncio
+from dataclasses import replace
 import json
 import os
 import stat
 import sys
 import threading
 import zipfile
-from dataclasses import replace
 
 import pytest
 
@@ -65,9 +65,11 @@ def test_host_parallelism_and_sequential_folders(tmp_path):
     config = replace(config, jobs=(*config.jobs, replace(config.jobs[0], name="second")))
 
     class Observed(FakeBackend):
-        active = 0
-        peak = 0
-        hosts = set()
+        def __init__(self, cloud):
+            super().__init__(cloud)
+            self.active = 0
+            self.peak = 0
+            self.hosts = set()
 
         async def pull(self, host, job, destination, emit):
             assert job.host not in self.hosts
@@ -113,7 +115,8 @@ def test_directory_scan_failure_skips_zip_upload_and_retention(tmp_path, monkeyp
     def fail_nested_scan(path):
         if str(path).endswith("/data/alpha/config/secrets"):
             failures.append(path)
-            raise error_type(f"cannot scan {path}")
+            msg = f"cannot scan {path}"
+            raise error_type(msg)
         return scandir(path)
 
     monkeypatch.setattr(os, "scandir", fail_nested_scan)
@@ -137,10 +140,11 @@ def test_exhausted_pull_continues_other_hosts_and_skips_archive(tmp_path):
         async def pull(self, host, job, destination, emit):
             if job.host == "alpha":
                 self.failures += 1
-                raise RuntimeError("fake offline host")
+                msg = "fake offline host"
+                raise RuntimeError(msg)
             await super().pull(host, job, destination, emit)
 
-        async def upload(self, *args):
+        async def upload(self, *_args):
             pytest.fail("must not upload incomplete runs")
 
     backend = Broken(tmp_path / "cloud")
@@ -156,15 +160,16 @@ def test_upload_retry_reuses_zip_without_pulls_and_rejects_tampering(tmp_path):
     config, _ = setup(tmp_path)
 
     class UploadFails(FakeBackend):
-        async def upload(self, *args):
-            raise RuntimeError("fake cloud offline")
+        async def upload(self, *_args):
+            msg = "fake cloud offline"
+            raise RuntimeError(msg)
 
     result = asyncio.run(Runner(config, backend=UploadFails(tmp_path / "cloud")).run())
     assert result.status == "cloud_pending"
     original = result.archive.read_bytes()
 
     class NoPulls(FakeBackend):
-        async def pull(self, *args):
+        async def pull(self, *_args):
             pytest.fail("upload retry must not pull")
 
     runner = Runner(config, backend=NoPulls(tmp_path / "cloud"))
@@ -194,8 +199,9 @@ def test_upload_retry_survives_removed_ssh_credentials_and_binary(tmp_path, monk
     )
 
     class UploadFails(FakeBackend):
-        async def upload(self, *args):
-            raise RuntimeError("fake cloud offline")
+        async def upload(self, *_args):
+            msg = "fake cloud offline"
+            raise RuntimeError(msg)
 
     pending = asyncio.run(Runner(config, backend=UploadFails(cloud.cloud)).run())
     assert pending.status == "cloud_pending"
@@ -209,7 +215,7 @@ def test_upload_retry_survives_removed_ssh_credentials_and_binary(tmp_path, monk
     with pytest.raises(TransferError, match="executable not found"):
         backend.validate()
 
-    async def forbidden(*args):
+    async def forbidden(*_args):
         pytest.fail("upload retry must not pull from a source server")
 
     monkeypatch.setattr(backend, "pull", forbidden)
@@ -239,8 +245,9 @@ def test_pending_upload_not_pruned_by_next_success(tmp_path):
     config, backend = setup(tmp_path, keep_local=1, keep_cloud=1)
 
     class Failing(FakeBackend):
-        async def upload(self, *args):
-            raise RuntimeError("cloud unavailable")
+        async def upload(self, *_args):
+            msg = "cloud unavailable"
+            raise RuntimeError(msg)
 
     pending = asyncio.run(Runner(config, backend=Failing(tmp_path / "cloud")).run())
     for _ in range(2):
@@ -258,9 +265,8 @@ def test_pending_upload_not_pruned_by_next_success(tmp_path):
 def test_local_only_and_lock(tmp_path):
     config, backend = setup(tmp_path)
     config = replace(config, cloud=CloudConfig())
-    with state.run_lock(config.destination):
-        with pytest.raises(state.RunLocked):
-            asyncio.run(Runner(config, backend=backend).run())
+    with state.run_lock(config.destination), pytest.raises(state.RunLocked):
+        asyncio.run(Runner(config, backend=backend).run())
     assert asyncio.run(Runner(config, backend=backend).run()).success
     assert not backend.cloud.exists()
 
@@ -280,10 +286,11 @@ def test_storage_requirement_fails_before_pulls(tmp_path, monkeypatch):
     config, backend = setup(tmp_path)
     config = replace(config, require_case_sensitive=True)
 
-    def unavailable(root):
-        raise ValueError("case-sensitive filesystem required")
+    def unavailable(_root):
+        msg = "case-sensitive filesystem required"
+        raise ValueError(msg)
 
-    async def forbidden(*args):
+    async def forbidden(*_args):
         pytest.fail("storage must be checked before reading any server")
 
     monkeypatch.setattr(state, "check_case_sensitive", unavailable)

@@ -1,16 +1,17 @@
 """Small transfer contract and the rclone implementation. No shell execution."""
 
 import asyncio
+from collections import deque
+import contextlib
 import csv
 import io
 import json
 import os
+from pathlib import Path
 import shlex
 import shutil
 import signal
 import sys
-from collections import deque
-from pathlib import Path
 from typing import Protocol
 
 from .config import Config, Host, Job
@@ -44,10 +45,12 @@ class RcloneBackend:
                 paths.extend([host.identity_file, host.ssh_config])
         for binary in binaries:
             if shutil.which(binary) is None:
-                raise TransferError(f"executable not found: {binary}")
+                msg = f"executable not found: {binary}"
+                raise TransferError(msg)
         for path in paths:
             if path is not None and not path.is_file():
-                raise TransferError(f"configuration/key file not found: {path}")
+                msg = f"configuration/key file not found: {path}"
+                raise TransferError(msg)
 
     def ssh_command(self, host: Host) -> str:
         args = [self.config.ssh_binary]
@@ -162,49 +165,45 @@ class RcloneBackend:
         )
         try:
             async with asyncio.timeout(self.config.transfer_timeout):
-                assert proc.stdout is not None
-                async for line in proc.stdout:
-                    message = line.decode("utf-8", errors="replace").strip()
-                    try:
-                        data = json.loads(message)
-                    except (ValueError, TypeError):
-                        tail.append(message[:1000])
-                        continue
-                    if not isinstance(data, dict):
-                        continue
-                    if data.get("level", "").lower() in {"error", "fatal", "warning"}:
-                        tail.append(str(data.get("msg", ""))[:1000])
-                    stats = data.get("stats")
-                    if isinstance(stats, dict):
-                        emit(
-                            Event(
-                                task,
-                                "transfer",
-                                int(stats.get("bytes") or 0),
-                                int(stats["totalBytes"]) if stats.get("totalBytes") else None,
+                if proc.stdout is not None:
+                    async for line in proc.stdout:
+                        message = line.decode("utf-8", errors="replace").strip()
+                        try:
+                            data = json.loads(message)
+                        except (ValueError, TypeError):
+                            tail.append(message[:1000])
+                            continue
+                        if not isinstance(data, dict):
+                            continue
+                        if data.get("level", "").lower() in {"error", "fatal", "warning"}:
+                            tail.append(str(data.get("msg", ""))[:1000])
+                        stats = data.get("stats")
+                        if isinstance(stats, dict):
+                            emit(
+                                Event(
+                                    task,
+                                    "transfer",
+                                    int(stats.get("bytes") or 0),
+                                    int(stats["totalBytes"]) if stats.get("totalBytes") else None,
+                                )
                             )
-                        )
                 code = await proc.wait()
                 if code:
-                    raise TransferError(f"rclone exited {code}: {'; '.join(tail)}")
+                    msg = f"rclone exited {code}: {'; '.join(tail)}"
+                    raise TransferError(msg)
         except TimeoutError as exc:
-            raise TransferError(f"transfer exceeded {self.config.transfer_timeout:g}s") from exc
+            msg = f"transfer exceeded {self.config.transfer_timeout:g}s"
+            raise TransferError(msg) from exc
         finally:
             # Kill the process group, including external SSH children, on cancellation/error.
             # Also clean up stray descendants if the parent exited before a pipe was closed.
             if proc.returncode is None:
-                try:
+                with contextlib.suppress(ProcessLookupError):
                     os.killpg(proc.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-                try:
+                with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(proc.wait(), 3)
-                except TimeoutError:
-                    pass
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
             await proc.wait()
 
     def describe_pull(self, host: Host, job: Job, destination: Path) -> str:

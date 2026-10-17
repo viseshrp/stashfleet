@@ -7,7 +7,7 @@ import pytest
 def forbid_network(monkeypatch):
     """Any accidental server/cloud connection from package code fails the test."""
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*_args, **_kwargs):
         pytest.fail("network access is forbidden in Stashfleet tests")
 
     monkeypatch.setattr(socket, "create_connection", forbidden)

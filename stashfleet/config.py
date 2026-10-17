@@ -1,12 +1,12 @@
 """Strict TOML configuration; relative local paths resolve beside the config file."""
 
+from dataclasses import dataclass, field
 import math
+from pathlib import Path
 import re
 import tomllib
-import zipfile
-from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
+import zipfile
 
 
 class ConfigError(ValueError):
@@ -44,18 +44,22 @@ class ArchiveConfig:
             "lzma": (zipfile.ZIP_LZMA, None),
         }
         if not isinstance(self.compression, str) or self.compression not in methods:
-            raise ConfigError("archive.compression must be store, deflate, bzip2, or lzma")
+            msg = "archive.compression must be store, deflate, bzip2, or lzma"
+            raise ConfigError(msg)
         method, default = methods[self.compression]
         module = {"deflate": "zlib", "bzip2": "bz2", "lzma": "lzma"}.get(self.compression)
         if module and getattr(zipfile, module) is None:
-            raise ConfigError(f"this Python installation does not support {self.compression}")
+            msg = f"this Python installation does not support {self.compression}"
+            raise ConfigError(msg)
         level = self.level if self.level is not None else default
         if self.compression in {"store", "lzma"} and level is not None:
-            raise ConfigError(f"{self.compression} does not accept a compression level")
+            msg = f"{self.compression} does not accept a compression level"
+            raise ConfigError(msg)
         if level is not None:
             minimum = 1 if self.compression == "bzip2" else 0
             if type(level) is not int or not minimum <= level <= 9:
-                raise ConfigError(f"{self.compression} level must be {minimum}..9")
+                msg = f"{self.compression} level must be {minimum}..9"
+                raise ConfigError(msg)
         return method, level
 
 
@@ -92,23 +96,30 @@ class Config:
 
     def validate(self) -> None:
         if type(self.require_case_sensitive) is not bool:
-            raise ConfigError("require_case_sensitive must be true or false")
+            msg = "require_case_sensitive must be true or false"
+            raise ConfigError(msg)
         for name in ("parallel_hosts", "transfers", "attempts", "connect_timeout"):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
-                raise ConfigError(f"{name} must be a positive integer")
+                msg = f"{name} must be a positive integer"
+                raise ConfigError(msg)
         for name in ("retry_delay", "transfer_timeout"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise ConfigError(f"{name} must be a number")
+                msg = f"{name} must be a number"
+                raise ConfigError(msg)
             if not math.isfinite(value) or value < 0 or (name == "transfer_timeout" and not value):
-                raise ConfigError(f"invalid {name}")
+                msg = f"invalid {name}"
+                raise ConfigError(msg)
         for name in ("keep_local", "keep_cloud"):
             if type(getattr(self, name)) is not int or getattr(self, name) < 0:
-                raise ConfigError(f"{name} must be a nonnegative integer (0 keeps everything)")
+                msg = f"{name} must be a nonnegative integer (0 keeps everything)"
+                raise ConfigError(msg)
         if not self.destination.is_absolute():
-            raise ConfigError("destination must be absolute when using the Python API")
+            msg = "destination must be absolute when using the Python API"
+            raise ConfigError(msg)
         if not self.jobs:
-            raise ConfigError("at least one job is required")
+            msg = "at least one job is required"
+            raise ConfigError(msg)
         seen = set()
         for name, host in self.hosts.items():
             _name(name)
@@ -117,9 +128,11 @@ class Config:
                 or not host.sftp_server_command.strip()
                 or any(c in host.sftp_server_command for c in "\x00\r\n")
             ):
-                raise ConfigError(f"invalid SFTP server command for {name}")
+                msg = f"invalid SFTP server command for {name}"
+                raise ConfigError(msg)
             if host.address is None:
-                raise ConfigError(f"host {name} needs an address")
+                msg = f"host {name} needs an address"
+                raise ConfigError(msg)
             for value in (host.address, host.user):
                 if value is not None and (
                     not isinstance(value, str)
@@ -127,50 +140,63 @@ class Config:
                     or value.startswith("-")
                     or any(c.isspace() or c in "\x00@" for c in value)
                 ):
-                    raise ConfigError(f"invalid SSH address/user for host {name}")
+                    msg = f"invalid SSH address/user for host {name}"
+                    raise ConfigError(msg)
             if host.port is not None and (
                 type(host.port) is not int or not 1 <= host.port <= 65535
             ):
-                raise ConfigError(f"invalid SSH port for {name}")
+                msg = f"invalid SSH port for {name}"
+                raise ConfigError(msg)
         for job in self.jobs:
             _name(job.name)
             if job.host not in self.hosts:
-                raise ConfigError(f"unknown host {job.host!r} in job {job.name}")
+                msg = f"unknown host {job.host!r} in job {job.name}"
+                raise ConfigError(msg)
             key = (job.host.casefold(), job.name.casefold())
             if key in seen:
-                raise ConfigError(f"duplicate destination for {job.host}/{job.name}")
+                msg = f"duplicate destination for {job.host}/{job.name}"
+                raise ConfigError(msg)
             seen.add(key)
             if not isinstance(job.source, str) or not job.source.startswith("/"):
-                raise ConfigError(f"source for {job.name} must be an absolute remote folder")
+                msg = f"source for {job.name} must be an absolute remote folder"
+                raise ConfigError(msg)
             if any(c in job.source for c in "\x00\r\n"):
-                raise ConfigError("source contains a control character")
+                msg = "source contains a control character"
+                raise ConfigError(msg)
             if not all(isinstance(x, str) and "\x00" not in x for x in job.excludes):
-                raise ConfigError("excludes must be strings")
+                msg = "excludes must be strings"
+                raise ConfigError(msg)
         if len({name.casefold() for name in self.hosts}) != len(self.hosts):
-            raise ConfigError("host names must be unique ignoring case")
+            msg = "host names must be unique ignoring case"
+            raise ConfigError(msg)
         if type(self.cloud.enabled) is not bool:
-            raise ConfigError("cloud.enabled must be true or false")
+            msg = "cloud.enabled must be true or false"
+            raise ConfigError(msg)
         if not isinstance(self.cloud.destination, str) or (
             self.cloud.enabled
             and not re.fullmatch(
                 r"[A-Za-z0-9_][A-Za-z0-9_.-]*:[^\x00\r\n]*", self.cloud.destination
             )
         ):
-            raise ConfigError("cloud.destination must be a named rclone remote:path")
+            msg = "cloud.destination must be a named rclone remote:path"
+            raise ConfigError(msg)
         self.archive.options()
 
 
 def _name(value: str) -> None:
     if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value):
-        raise ConfigError("host/job names must be 1..64 letters, digits, underscores or hyphens")
+        msg = "host/job names must be 1..64 letters, digits, underscores or hyphens"
+        raise ConfigError(msg)
 
 
-def _table(value: Any, allowed: set[str], label: str) -> dict:
+def _table(value: Any, allowed: set[str], label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
-        raise ConfigError(f"{label} must be a TOML table")
+        msg = f"{label} must be a TOML table"
+        raise ConfigError(msg)
     unknown = value.keys() - allowed
     if unknown:
-        raise ConfigError(f"unknown {label} options: {', '.join(sorted(unknown))}")
+        msg = f"unknown {label} options: {', '.join(sorted(unknown))}"
+        raise ConfigError(msg)
     return value
 
 
@@ -179,7 +205,8 @@ def load_config(path: str | Path) -> Config:
 
     def local(value: str) -> Path:
         if not isinstance(value, str) or not value:
-            raise ConfigError("local paths must be nonempty strings")
+            msg = "local paths must be nonempty strings"
+            raise ConfigError(msg)
         expanded = Path(value).expanduser()
         return (path.parent / expanded).resolve()
 
@@ -209,18 +236,27 @@ def load_config(path: str | Path) -> Config:
                 "host",
             )
             hosts[name] = Host(
-                **{
-                    **h,
-                    "address": h.get("address", name),
-                    **{k: local(h[k]) for k in ("identity_file", "ssh_config") if k in h},
-                }
+                address=h.get("address", name),
+                user=h.get("user"),
+                port=h.get("port"),
+                identity_file=local(h["identity_file"]) if "identity_file" in h else None,
+                ssh_config=local(h["ssh_config"]) if "ssh_config" in h else None,
+                sftp_server_command=h.get("sftp_server_command"),
             )
         jobs = []
         for value in raw.get("jobs", []):
             j = _table(value, {"name", "host", "source", "excludes"}, "job")
             if not isinstance(j.get("excludes", []), list):
-                raise ConfigError("job.excludes must be an array")
-            jobs.append(Job(**{**j, "excludes": tuple(j.get("excludes", []))}))
+                msg = "job.excludes must be an array"
+                raise ConfigError(msg)
+            jobs.append(
+                Job(
+                    name=j["name"],
+                    host=j["host"],
+                    source=j["source"],
+                    excludes=tuple(j.get("excludes", [])),
+                )
+            )
         runner = _table(
             raw.get("runner", {}),
             {
@@ -245,7 +281,8 @@ def load_config(path: str | Path) -> Config:
         )
         for key, value in rclone.items():
             if not isinstance(value, str) or not value or "\x00" in value:
-                raise ConfigError(f"rclone.{key} must be a nonempty string")
+                msg = f"rclone.{key} must be a nonempty string"
+                raise ConfigError(msg)
         archive = _table(raw.get("archive", {}), {"compression", "level"}, "archive")
         cloud = _table(raw.get("cloud", {}), {"enabled", "destination"}, "cloud")
         retention = _table(raw.get("retention", {}), {"keep_local", "keep_cloud"}, "retention")
@@ -264,6 +301,8 @@ def load_config(path: str | Path) -> Config:
             bandwidth_limit=rclone.get("bandwidth_limit"),
         )
         config.validate()
-        return config
     except (KeyError, TypeError, AttributeError, tomllib.TOMLDecodeError) as exc:
-        raise ConfigError(f"invalid configuration: {exc}") from exc
+        msg = f"invalid configuration: {exc}"
+        raise ConfigError(msg) from exc
+    else:
+        return config

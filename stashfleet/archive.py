@@ -2,11 +2,11 @@
 
 import hashlib
 import os
+from pathlib import Path
 import stat
 import threading
-import zipfile
-from pathlib import Path
 from typing import Protocol
+import zipfile
 
 from .config import ArchiveConfig
 from .events import Event, EventSink
@@ -41,7 +41,8 @@ class ZipArchiver:
                 path = Path(directory) / name
                 mode = path.lstat().st_mode
                 if stat.S_ISLNK(mode) or not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
-                    raise ValueError(f"ZIP input must contain regular files/directories: {path}")
+                    msg = f"ZIP input must contain regular files/directories: {path}"
+                    raise ValueError(msg)
                 files.append(path)
                 if path.is_file():
                     total += path.stat().st_size
@@ -66,7 +67,7 @@ class ZipArchiver:
                     info = zipfile.ZipInfo.from_file(path, relative, strict_timestamps=False)
                     info.compress_type = method
                     # ZipInfo.compress_level becomes public in Python 3.13.
-                    info._compresslevel = level
+                    info._compresslevel = level  # ty: ignore[unresolved-attribute]
                     with (
                         path.open("rb") as incoming,
                         output.open(info, "w", force_zip64=True) as out,
@@ -90,7 +91,8 @@ def _walk_error(error: OSError) -> None:
 
 def _cancelled(stop: threading.Event) -> None:
     if stop.is_set():
-        raise InterruptedError("archive operation cancelled")
+        msg = "archive operation cancelled"
+        raise InterruptedError(msg)
 
 
 def sha256(path: Path, stop: threading.Event) -> str:

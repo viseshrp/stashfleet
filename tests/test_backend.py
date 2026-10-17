@@ -1,15 +1,16 @@
 import asyncio
+import contextlib
 import csv
+from dataclasses import replace
 import json
 import os
+from pathlib import Path
 import shutil
 import signal
 import subprocess
 import sys
 import textwrap
 import time
-from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
@@ -233,8 +234,9 @@ destination = "fake:backups"
     if command == "retry-upload":
 
         class UploadFails(FakeBackend):
-            async def upload(self, *args):
-                raise RuntimeError("fake cloud offline")
+            async def upload(self, *_args):
+                msg = "fake cloud offline"
+                raise RuntimeError(msg)
 
         pending = asyncio.run(Runner(cfg, backend=UploadFails(tmp_path / "cloud")).run())
         assert pending.status == "cloud_pending"
@@ -254,7 +256,9 @@ destination = "fake:backups"
         "FAKE_MODE": "block",
         "FAKE_STOP_DELAY": "0.3",
     }
-    proc = subprocess.Popen(args, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(  # noqa: S603
+        args, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
 
     def wait_for_marker(key):
         deadline = time.monotonic() + 5
@@ -339,7 +343,5 @@ def test_timeout_and_cancellation_stop_process_group(tmp_path, fake_rclone, monk
     finally:
         # A failed test must not leave the deliberately sleeping fixture child alive.
         if (tmp_path / "pid").exists():
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.kill(int((tmp_path / "pid").read_text()), signal.SIGKILL)
-            except ProcessLookupError:
-                pass
