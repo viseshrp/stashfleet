@@ -33,7 +33,14 @@ Stashfleet runs as a local CLI or Python library. It requires no web server or d
 
 ## Install and try without servers
 
-Requires Python 3.11+ on Linux or macOS. From this directory:
+Requires Python 3.11+ on Linux or macOS:
+
+```sh
+pip install stashfleet
+stashfleet demo --directory /tmp/stashfleet-demo
+```
+
+Or from a local checkout:
 
 ```sh
 python3 -m pip install -e .
@@ -310,8 +317,7 @@ the distribution declares compatible Click/Rich ranges for downstream installs.
 
 This repository is self-contained. It was extracted from
 [homelab](https://github.com/viseshrp/homelab/tree/main/stashfleet).
-Wheels and source distributions are built from `pyproject.toml`. Nothing here has been
-published to PyPI.
+Wheels and source distributions are built from `pyproject.toml`.
 
 ## Changelog
 

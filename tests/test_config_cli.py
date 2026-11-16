@@ -208,3 +208,91 @@ binary = "not-installed-rclone"
     assert not (tmp_path / "must-not-exist").exists()
     after = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
     assert before == after
+
+
+def test_config_validation_error_branches(tmp_path):
+    config, _ = create_demo(tmp_path / "demo")
+    alpha = config.hosts["alpha"]
+    job = config.jobs[0]
+    invalid_configs = [
+        replace(config, require_case_sensitive="yes"),
+        replace(config, retry_delay=True),
+        replace(config, retry_delay=-1),
+        replace(config, transfer_timeout=0),
+        replace(config, keep_local=-1),
+        replace(config, destination=tmp_path.relative_to(tmp_path.parent)),
+        replace(config, jobs=()),
+        replace(config, hosts={**config.hosts, "alpha": replace(alpha, address=None)}),
+        replace(config, hosts={**config.hosts, "alpha": replace(alpha, address="-bad")}),
+        replace(config, hosts={**config.hosts, "alpha": replace(alpha, user="bad@user")}),
+        replace(config, hosts={**config.hosts, "alpha": replace(alpha, port=70000)}),
+        replace(config, jobs=(replace(job, host="missing"),)),
+        replace(config, jobs=(replace(job, source="/srv/bad\npath"),)),
+        replace(config, jobs=(replace(job, excludes=("ok", "bad\x00")),)),
+        replace(config, hosts={**config.hosts, "ALPHA": alpha}),
+        replace(config, cloud=CloudConfig(enabled="yes", destination="gdrive:")),
+        replace(config, cloud=CloudConfig(enabled=True, destination="invalid_remote")),
+    ]
+    for bad in invalid_configs:
+        with pytest.raises(ConfigError):
+            bad.validate()
+
+
+@pytest.mark.parametrize(
+    "extra_toml",
+    [
+        'destination = ""\n',
+        (
+            'destination = "data"\n[hosts.alpha]\naddress = "a.invalid"\n'
+            '[[jobs]]\nname = "c"\nhost = "alpha"\nsource = "/s"\nexcludes = "not-a-list"\n'
+        ),
+        (
+            'destination = "data"\n[hosts.alpha]\naddress = "a.invalid"\n'
+            '[[jobs]]\nname = "c"\nhost = "alpha"\nsource = "/s"\n[rclone]\nbinary = ""\n'
+        ),
+    ],
+)
+def test_load_config_validation_branches(tmp_path, extra_toml):
+    path = tmp_path / "bad.toml"
+    path.write_text(extra_toml)
+    with pytest.raises(ConfigError):
+        load_config(path)
+
+
+def test_cli_doctor_status_json_events_and_errors(tmp_path):
+    demo_dir = tmp_path / "demo"
+    runner = CliRunner()
+    result = runner.invoke(main, ["demo", "--directory", str(demo_dir), "--json-events"])
+    assert result.exit_code == 0, result.output
+    lines = [json.loads(line) for line in result.output.strip().splitlines()]
+    assert lines[-1]["type"] == "result"
+    assert lines[-1]["status"] == "complete"
+
+    # Second demo in existing directory fails cleanly via friendly_errors.
+    again = runner.invoke(main, ["demo", "--directory", str(demo_dir), "--plain"])
+    assert again.exit_code != 0
+    assert "File exists" in again.output
+
+    config_path = tmp_path / "config.toml"
+    import sys
+
+    config_path.write_text(f"""destination = {json.dumps(str(demo_dir / "backups"))}
+[hosts.alpha]
+address = "alpha.invalid"
+[[jobs]]
+name = "config"
+host = "alpha"
+source = "/srv/config"
+[rclone]
+binary = {json.dumps(sys.executable)}
+ssh_binary = {json.dumps(sys.executable)}
+""")
+    doc = runner.invoke(main, ["doctor", "--config", str(config_path)])
+    assert doc.exit_code == 0, doc.output
+    assert "Configuration and executable paths OK" in doc.output
+
+    stat = runner.invoke(main, ["status", "--config", str(config_path), "--limit", "1"])
+    assert stat.exit_code == 0, stat.output
+    history = json.loads(stat.output)
+    assert len(history) == 1
+    assert history[0]["status"] == "complete"
